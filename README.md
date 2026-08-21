@@ -115,14 +115,14 @@ rtc.example.com      A  <STATIC_IP>
 rtc-jwt.example.com  A  <STATIC_IP>
 ```
 
-`panel.example.com` is optional and is only needed when Element Admin is enabled.
+`panel.example.com` is required with the default `COMPOSE_PROFILES=admin`. Set `COMPOSE_PROFILES=` to disable Element Admin and omit the `panel` DNS record.
 
 See [docs/dns.md](docs/dns.md).
 
 ## 5. Deploy
 
 ```bash
-docker compose --env-file .env pull
+docker compose --env-file .env pull --ignore-buildable
 docker compose --env-file .env build --pull config-init haproxy
 docker compose --env-file .env up -d
 docker compose --env-file .env ps
@@ -133,7 +133,7 @@ On the first PostgreSQL initialization, `postgres/init-databases.sh` creates two
 ## 6. Validate
 
 ```bash
-python3 scripts/smoke-test.sh .env
+./scripts/smoke-test.sh .env
 ```
 
 Federation endpoints:

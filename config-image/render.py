@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""EN: Generate persistent runtime configuration for the my_matrix stack.
-RU: Генерирует постоянные runtime-конфиги для стека my_matrix.
+"""EN: Generate persistent runtime configuration for the matrix-federated-gcp stack.
+RU: Генерирует постоянные runtime-конфиги для стека matrix-federated-gcp.
 
 EN: This image is intentionally the only place where configuration rendering lives.
 EN: The Compose file describes services; this script describes their configuration.
@@ -75,7 +75,6 @@ def generate_synapse() -> None:
     server_name = required("SYNAPSE_SERVER_NAME")
     public_base = required("SYNAPSE_PUBLIC_BASEURL").rstrip("/") + "/"
     element_url = required("ELEMENT_WEB_URL").rstrip("/") + "/"
-    mas_url = required("MAS_PUBLIC_BASEURL").rstrip("/") + "/"
     jwt_url = required("LIVEKIT_JWT_SERVICE_URL").rstrip("/")
 
     report_stats = as_bool("SYNAPSE_REPORT_STATS", False)
@@ -104,10 +103,6 @@ def generate_synapse() -> None:
 
     cfg["serve_server_wellknown"] = True
     cfg["extra_well_known_client_content"] = {
-        "org.matrix.msc2965.authentication": {
-            "issuer": mas_url,
-            "account": mas_url + "account/",
-        },
         "org.matrix.msc4143.rtc_foci": [
             {
                 "type": "livekit",
@@ -119,6 +114,7 @@ def generate_synapse() -> None:
     cfg["matrix_authentication_service"] = {
         "enabled": True,
         "endpoint": "http://mas:8080/",
+        "force_http2": True,
         "secret": required("MAS_SHARED_SECRET"),
     }
 
@@ -132,8 +128,18 @@ def generate_synapse() -> None:
     experimental = cfg.get("experimental_features") or {}
     experimental.pop("msc3861", None)
     experimental.pop("msc3266_enabled", None)  # stable in current Synapse
+    experimental["msc4143_enabled"] = True
     experimental["msc4222_enabled"] = True
     cfg["experimental_features"] = experimental
+
+    cfg["matrix_rtc"] = {
+        "transports": [
+            {
+                "type": "livekit",
+                "livekit_service_url": jwt_url,
+            }
+        ]
+    }
 
     cfg["user_directory"] = {
         "enabled": True,
@@ -175,6 +181,10 @@ def generate_synapse() -> None:
     }
 
     write_yaml(config_path, cfg)
+    subprocess.run(
+        [sys.executable, "-m", "synapse.config", "-c", str(config_path)],
+        check=True,
+    )
     print("[config-init] Synapse configuration ready")
 
 
@@ -227,11 +237,16 @@ def generate_mas() -> None:
                 {"name": "graphql", "playground": False},
                 {"name": "assets", "path": "/usr/local/share/mas-cli/assets/"},
                 {"name": "adminapi"},
-                {"name": "health"},
             ],
             "binds": [{"host": "0.0.0.0", "port": 8080}],
             "proxy_protocol": False,
-        }
+        },
+        {
+            "name": "internal",
+            "resources": [{"name": "health"}],
+            "binds": [{"host": "0.0.0.0", "port": 8081}],
+            "proxy_protocol": False,
+        },
     ]
 
     cfg["database"] = {
@@ -266,12 +281,12 @@ def generate_mas() -> None:
     cfg.setdefault("email", {})["transport"] = "blackhole"
     cfg.setdefault("branding", {})["service_name"] = required("MAS_BRAND_NAME")
 
-    write_yaml(config_path, cfg)
-
-    config_dir.chmod(0o700)
-    config_path.chmod(0o600)
-    os.chown(config_dir, 65532, 65532)
-    os.chown(config_path, 65532, 65532)
+    write_yaml(config_path, cfg, mode=0o644)
+    config_dir.chmod(0o755)
+    subprocess.run(
+        ["/usr/local/bin/mas-cli", "config", "check", f"--config={config_path}"],
+        check=True,
+    )
 
     print("[config-init] MAS configuration ready")
 

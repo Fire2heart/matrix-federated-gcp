@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Small dependency-free regression tests for .env safety logic."""
+"""Dependency-free regression tests for .env generation and validation."""
 
 from __future__ import annotations
 
@@ -25,8 +25,26 @@ def write_fresh(path: Path) -> dict[str, str]:
     )
     path.write_text(content, encoding="utf-8")
     values, _ = parse_env(path)
-    assert not validate_env(path)
-    return values
+    assert not validate_env(path), validate_env(path)
+    return dict(values)
+
+
+def set_value(path: Path, key: str, value: str) -> None:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    prefix = f"{key}="
+    replaced = False
+    for index, line in enumerate(lines):
+        if line.startswith(prefix):
+            lines[index] = prefix + value
+            replaced = True
+            break
+    assert replaced, f"missing test key {key}"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def assert_invalid(path: Path, expected_fragment: str) -> None:
+    errors = validate_env(path)
+    assert any(expected_fragment in error for error in errors), errors
 
 
 def main() -> None:
@@ -36,7 +54,7 @@ def main() -> None:
 
         updated_content = render_env(
             domain="example.com",
-                public_ip="34.120.10.21",
+            public_ip="34.120.10.21",
             cloudflare_zone_id=before["CLOUDFLARE_ZONE_ID"],
             cloudflare_api_token="",
             acme_email=before["ACME_EMAIL"],
@@ -47,10 +65,38 @@ def main() -> None:
         )
         path.write_text(updated_content, encoding="utf-8")
         after, _ = parse_env(path)
-        assert not validate_env(path)
+        assert not validate_env(path), validate_env(path)
         assert after["PUBLIC_IP"] == "34.120.10.21"
         for key in PRESERVE_ON_UPDATE_KEYS:
             assert before[key] == after[key], f"safe update rotated {key}"
+
+        write_fresh(path)
+        set_value(path, "PUBLIC_IP", "2001:db8::1")
+        assert_invalid(path, "must be an IPv4")
+
+        write_fresh(path)
+        set_value(path, "MAS_DB_NAME", "synapse")
+        assert_invalid(path, "DB_NAME and MAS_DB_NAME must be different")
+
+        write_fresh(path)
+        set_value(path, "MAS_DB_USER", "synapse")
+        assert_invalid(path, "DB_USER and MAS_DB_USER must be different")
+
+        write_fresh(path)
+        set_value(path, "MAS_EMAIL_REQUIRED", "sometimes")
+        assert_invalid(path, "MAS_EMAIL_REQUIRED must be a boolean")
+
+        write_fresh(path)
+        set_value(path, "ELEMENT_ADMIN_IMAGE", "oci.element.io/element-admin:latest")
+        assert_invalid(path, "must not use the mutable :latest tag")
+
+        write_fresh(path)
+        set_value(path, "MAS_TRUSTED_PROXIES", "10.0.0.0/8,not-a-network")
+        assert_invalid(path, "MAS_TRUSTED_PROXIES contains invalid CIDR")
+
+        write_fresh(path)
+        set_value(path, "MAS_DEBUG_IMAGE", "ghcr.io/element-hq/matrix-authentication-service:1.20.0-debug")
+        assert_invalid(path, "MAS_DEBUG_IMAGE must match MAS_IMAGE version")
 
     print("Environment safety tests passed")
 

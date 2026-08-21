@@ -26,7 +26,7 @@ def main() -> int:
         "--public-ip",
         dest="public_ip",
         required=True,
-        help="Static public IPv4/IPv6 address assigned to the GCP VM and advertised by LiveKit",
+        help="Static public IPv4 address assigned to the GCP VM and advertised by LiveKit",
     )
     parser.add_argument("--cloudflare-zone-id")
     parser.add_argument(

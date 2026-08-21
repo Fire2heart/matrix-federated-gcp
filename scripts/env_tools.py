@@ -6,8 +6,8 @@ RU: Общие helpers для безопасной генерации и про�
 from __future__ import annotations
 
 import ipaddress
-import re
 import os
+import re
 import secrets
 import tempfile
 from collections import OrderedDict
@@ -43,6 +43,30 @@ DOMAIN_DERIVED_KEYS = {
     "HAPROXY_RTC_JWT_HOST",
     "HAPROXY_RTC_HOST",
 }
+
+BOOLEAN_KEYS = {
+    "SYNAPSE_REPORT_STATS",
+    "USER_DIRECTORY_SEARCH_ALL",
+    "USER_DIRECTORY_EXCLUDE_REMOTE",
+    "MAS_REGISTRATION_TOKEN_REQUIRED",
+    "MAS_EMAIL_REQUIRED",
+}
+
+IMAGE_KEYS = {
+    "ACME_IMAGE",
+    "POSTGRES_IMAGE",
+    "REDIS_IMAGE",
+    "SYNAPSE_IMAGE",
+    "MAS_IMAGE",
+    "MAS_DEBUG_IMAGE",
+    "ELEMENT_WEB_IMAGE",
+    "ELEMENT_ADMIN_IMAGE",
+    "LIVEKIT_IMAGE",
+    "LK_JWT_IMAGE",
+    "HAPROXY_BASE_IMAGE",
+}
+
+ALLOW_EMPTY_KEYS = {"ACME_EMAIL", "COMPOSE_PROFILES"}
 
 
 def parse_env(path: Path) -> tuple[OrderedDict[str, str], list[str]]:
@@ -139,10 +163,10 @@ def render_env(
         for key in RANDOM_SECRET_KEYS | {"LIVEKIT_KEY"}:
             values[key] = random_value(key)
     else:
-        # EN: Preserve persistent-service credentials during an update. Generate a value
-        # EN: only when a required credential is missing or still contains a placeholder.
-        # RU: При обновлении сохраняем credentials persistent-сервисов. Новое значение
-        # RU: генерируется только если обязательный credential отсутствует или не заполнен.
+        # EN: Persistent credentials are preserved during safe updates. Generate only
+        # EN: values that are absent or still placeholders.
+        # RU: При безопасном обновлении persistent credentials сохраняются. Новое
+        # RU: значение создаётся только если credential отсутствует или не заполнен.
         for key in RANDOM_SECRET_KEYS | {"LIVEKIT_KEY"}:
             current = values.get(key, "")
             if not current or current.startswith("CHANGE_ME"):
@@ -160,6 +184,23 @@ def render_env(
     return "\n".join(output_lines) + "\n"
 
 
+def _is_bool(value: str) -> bool:
+    return value.strip().lower() in {"1", "0", "true", "false", "yes", "no", "on", "off"}
+
+
+def _has_explicit_image_ref(value: str) -> bool:
+    if "@sha256:" in value:
+        return True
+    return ":" in value.rsplit("/", 1)[-1]
+
+
+def _image_tag(value: str) -> str:
+    if "@" in value:
+        return ""
+    last = value.rsplit("/", 1)[-1]
+    return last.rsplit(":", 1)[1] if ":" in last else ""
+
+
 def validate_env(path: Path, *, allow_placeholders: set[str] | None = None) -> list[str]:
     allow_placeholders = allow_placeholders or set()
     values, duplicates = parse_env(path)
@@ -173,35 +214,77 @@ def validate_env(path: Path, *, allow_placeholders: set[str] | None = None) -> l
     if missing:
         errors.append("Missing keys: " + ", ".join(missing))
 
+    for key in sorted(required):
+        value = values.get(key, "")
+        if key not in ALLOW_EMPTY_KEYS and not value.strip():
+            errors.append(f"{key} must not be empty")
+
     for key, value in values.items():
         if "CHANGE_ME" in value and key not in allow_placeholders:
             errors.append(f"{key} still contains CHANGE_ME")
 
     domain = values.get("PUBLIC_DOMAIN", "").strip().lower().rstrip(".")
-    if not domain or not re.fullmatch(r"(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}", domain):
+    if not domain or not re.fullmatch(
+        r"(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}",
+        domain,
+    ):
         errors.append("PUBLIC_DOMAIN is not a valid DNS domain")
 
     ip_value = values.get("PUBLIC_IP", "")
     try:
-        ipaddress.ip_address(ip_value)
+        parsed_ip = ipaddress.ip_address(ip_value)
+        if parsed_ip.version != 4:
+            errors.append("PUBLIC_IP must be an IPv4 address for this GCP deployment")
     except ValueError:
-        errors.append("PUBLIC_IP is not a valid IPv4/IPv6 address")
+        errors.append("PUBLIC_IP is not a valid IPv4 address")
+
+    zone_id = values.get("CLOUDFLARE_ZONE_ID", "")
+    if "CLOUDFLARE_ZONE_ID" not in allow_placeholders and not re.fullmatch(r"[0-9a-fA-F]{32}", zone_id):
+        errors.append("CLOUDFLARE_ZONE_ID must be a 32-character hexadecimal zone ID")
 
     expected = derived_values(domain) if domain else {}
     for key in DOMAIN_DERIVED_KEYS:
         if key in expected and values.get(key) != expected[key]:
             errors.append(f"{key} does not match PUBLIC_DOMAIN ({expected[key]})")
 
-    for key in ("SYNAPSE_PUBLIC_BASEURL", "ELEMENT_WEB_URL", "MAS_PUBLIC_BASEURL", "LIVEKIT_JWT_SERVICE_URL"):
-        value = values.get(key, "")
-        parsed = urlparse(value)
+    for key in (
+        "SYNAPSE_PUBLIC_BASEURL",
+        "ELEMENT_WEB_URL",
+        "MAS_PUBLIC_BASEURL",
+        "LIVEKIT_JWT_SERVICE_URL",
+    ):
+        parsed = urlparse(values.get(key, ""))
         if parsed.scheme != "https" or not parsed.netloc:
             errors.append(f"{key} must be an https:// URL")
 
-    livekit_url = values.get("LIVEKIT_PUBLIC_URL", "")
-    parsed_livekit = urlparse(livekit_url)
+    parsed_livekit = urlparse(values.get("LIVEKIT_PUBLIC_URL", ""))
     if parsed_livekit.scheme != "wss" or not parsed_livekit.netloc:
         errors.append("LIVEKIT_PUBLIC_URL must be a wss:// URL")
+
+    for key in BOOLEAN_KEYS:
+        value = values.get(key, "")
+        if not _is_bool(value):
+            errors.append(f"{key} must be a boolean value")
+
+    profiles = {item.strip() for item in values.get("COMPOSE_PROFILES", "").split(",") if item.strip()}
+    unknown_profiles = profiles - {"admin"}
+    if unknown_profiles:
+        errors.append("Unknown COMPOSE_PROFILES: " + ", ".join(sorted(unknown_profiles)))
+
+    if values.get("SYNAPSE_DB_NAME") == values.get("MAS_DB_NAME"):
+        errors.append("SYNAPSE_DB_NAME and MAS_DB_NAME must be different")
+    if values.get("SYNAPSE_DB_USER") == values.get("MAS_DB_USER"):
+        errors.append("SYNAPSE_DB_USER and MAS_DB_USER must be different")
+
+    trusted_proxies = [item.strip() for item in values.get("MAS_TRUSTED_PROXIES", "").split(",") if item.strip()]
+    if not trusted_proxies:
+        errors.append("MAS_TRUSTED_PROXIES must contain at least one CIDR")
+    else:
+        for network in trusted_proxies:
+            try:
+                ipaddress.ip_network(network, strict=False)
+            except ValueError:
+                errors.append(f"MAS_TRUSTED_PROXIES contains invalid CIDR: {network}")
 
     try:
         start = int(values.get("LIVEKIT_UDP_PORT_START", ""))
@@ -211,17 +294,31 @@ def validate_env(path: Path, *, allow_placeholders: set[str] | None = None) -> l
     except ValueError:
         errors.append("LiveKit UDP port range is invalid")
 
+    for key in IMAGE_KEYS:
+        image = values.get(key, "").strip()
+        if not image:
+            continue
+        if not _has_explicit_image_ref(image):
+            errors.append(f"{key} must use an explicit image tag or digest")
+        if _image_tag(image) == "latest":
+            errors.append(f"{key} must not use the mutable :latest tag")
+
     if not values.get("ACME_IMAGE", "").startswith("neilpang/acme.sh:"):
         errors.append("ACME_IMAGE must reference neilpang/acme.sh with an explicit tag")
 
+    mas_image = values.get("MAS_IMAGE", "")
+    mas_debug_image = values.get("MAS_DEBUG_IMAGE", "")
+    if mas_image and mas_debug_image and "@" not in mas_image:
+        expected_debug = mas_image + "-debug"
+        if mas_debug_image != expected_debug:
+            errors.append("MAS_DEBUG_IMAGE must match MAS_IMAGE version with the -debug suffix")
 
     return errors
 
 
-
 def validate_env_content(content: str, *, allow_placeholders: set[str] | None = None) -> list[str]:
     """Validate rendered env text without touching the target deployment file."""
-    fd, name = tempfile.mkstemp(prefix="my-matrix-env-check-", text=True)
+    fd, name = tempfile.mkstemp(prefix="matrix-federated-gcp-env-check-", text=True)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(content)
@@ -241,6 +338,3 @@ def write_secure_atomic(path: Path, content: str) -> None:
     tmp.chmod(0o600)
     os.replace(tmp, path)
     path.chmod(0o600)
-
-def redact_key(key: str) -> bool:
-    return key in PRESERVE_ON_UPDATE_KEYS or "PASSWORD" in key or "SECRET" in key or "TOKEN" in key

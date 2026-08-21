@@ -103,7 +103,9 @@ def ask_ip(label: str, msg: dict[str, str], default: str = "") -> str:
     while True:
         value = ask(label, msg, default)
         try:
-            ipaddress.ip_address(value)
+            parsed = ipaddress.ip_address(value)
+            if parsed.version != 4:
+                raise ValueError
             return value
         except ValueError:
             print(f"  {msg['bad_ip']}")

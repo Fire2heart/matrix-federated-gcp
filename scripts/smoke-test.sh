@@ -2,6 +2,8 @@
 set -eu
 
 ENV_FILE="${1:-.env}"
+command -v curl >/dev/null 2>&1 || { echo "curl is required" >&2; exit 1; }
+
 if [ ! -f "$ENV_FILE" ]; then
   echo "Missing $ENV_FILE" >&2
   exit 1
@@ -43,7 +45,6 @@ check "Synapse versions" "${SYNAPSE_PUBLIC_BASEURL%/}/_matrix/client/versions"
 check "Client well-known" "${SYNAPSE_PUBLIC_BASEURL%/}/.well-known/matrix/client"
 check "Server well-known" "${SYNAPSE_PUBLIC_BASEURL%/}/.well-known/matrix/server"
 check "Federation version" "${SYNAPSE_PUBLIC_BASEURL%/}/_matrix/federation/v1/version"
-check "MAS health" "${MAS_PUBLIC_BASEURL%/}/health"
 check "MAS OIDC discovery" "${MAS_PUBLIC_BASEURL%/}/.well-known/openid-configuration"
 check "Element config" "${ELEMENT_WEB_URL%/}/config.json"
 check "RTC JWT health" "${LIVEKIT_JWT_SERVICE_URL%/}/healthz"

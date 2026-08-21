@@ -105,12 +105,12 @@ rtc.example.com      A  <STATIC_IP>
 rtc-jwt.example.com  A  <STATIC_IP>
 ```
 
-`panel.example.com` нужен только при включённом Element Admin.
+`panel.example.com` нужен при стандартном `COMPOSE_PROFILES=admin`. Чтобы отключить Element Admin и не создавать DNS-запись `panel`, установите `COMPOSE_PROFILES=`.
 
 ## 5. Deploy
 
 ```bash
-docker compose --env-file .env pull
+docker compose --env-file .env pull --ignore-buildable
 docker compose --env-file .env build --pull config-init haproxy
 docker compose --env-file .env up -d
 docker compose --env-file .env ps
@@ -121,7 +121,7 @@ docker compose --env-file .env ps
 ## 6. Проверка
 
 ```bash
-python3 scripts/smoke-test.sh .env
+./scripts/smoke-test.sh .env
 ```
 
 Federation:

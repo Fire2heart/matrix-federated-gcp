@@ -4,7 +4,7 @@
 
 ## VM
 
-Create a Compute Engine VM with Ubuntu 24.04 LTS. A practical initial size is 2 vCPU, 8 GB RAM and a 50 GB balanced persistent disk.
+Create a Compute Engine VM with Ubuntu 24.04 LTS. A practical initial size is 2 vCPU, 4 GB RAM minimum (8 GB recommended for heavier use), and a 50 GB balanced persistent disk.
 
 Reserve a static external IPv4 and attach it to `nic0`. The same address is written to `PUBLIC_IP` in `.env`.
 

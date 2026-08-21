@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""EN: Validate a my_matrix .env without printing secret values.
-RU: Проверяет my_matrix .env, не выводя секретные значения.
+"""EN: Validate a matrix-federated-gcp .env without printing secret values.
+RU: Проверяет matrix-federated-gcp .env, не выводя секретные значения.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from env_tools import ROOT, parse_env, validate_env
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Validate my_matrix .env without revealing secrets")
+    parser = argparse.ArgumentParser(description="Validate matrix-federated-gcp .env without revealing secrets")
     parser.add_argument("env_file", nargs="?", default=".env")
     parser.add_argument(
         "--allow-placeholder",
@@ -46,8 +46,8 @@ def main() -> int:
         return 1
 
     print("[OK] Domain-derived URLs/hostnames are consistent")
-    print("[OK] PUBLIC_IP and UDP port range are valid")
-    print("[OK] Environment is ready for Compose/Portainer")
+    print("[OK] Network, image and service-specific values are valid")
+    print("[OK] Environment is ready for Docker Compose")
     return 0
 
 

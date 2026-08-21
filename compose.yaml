@@ -1,4 +1,4 @@
-name: matrix_federated
+name: ${COMPOSE_PROJECT_NAME}
 
 x-logging: &default-logging
   driver: json-file
@@ -246,6 +246,7 @@ services:
   # RU: Одноразовое создание первого MAS-admin; marker хранится в mas_config.
   bootstrap-admin:
     image: ${MAS_DEBUG_IMAGE}
+    user: "0:0"
     restart: "no"
     depends_on:
       mas:
@@ -262,10 +263,11 @@ services:
           exit 0
         fi
         echo "Waiting for MAS..."
-        until /busybox/wget -q -O /dev/null http://mas:8080/health; do
+        until /busybox/wget -q -O /dev/null http://mas:8081/health; do
           /busybox/sleep 2
         done
-        /usr/local/bin/mas-cli -c /config/mas.yaml manage register-user "$${MAS_ADMIN_USER}" \
+        /usr/local/bin/mas-cli -c /config/mas.yaml manage register-user \
+          --username "$${MAS_ADMIN_USER}" \
           --password "$${MAS_ADMIN_PASSWORD}" \
           --display-name "$${MAS_ADMIN_DISPLAY_NAME}" \
           --admin --yes --ignore-password-complexity
@@ -342,6 +344,8 @@ services:
   haproxy:
     build:
       context: ./haproxy
+      args:
+        HAPROXY_BASE_IMAGE: ${HAPROXY_BASE_IMAGE}
     restart: unless-stopped
     depends_on:
       acme:

@@ -13,7 +13,7 @@ For `example.com`:
 | `element` | A | VM static IPv4 |
 | `rtc` | A | VM static IPv4 |
 | `rtc-jwt` | A | VM static IPv4 |
-| `panel` | A | VM static IPv4, optional |
+| `panel` | A | VM static IPv4; required while `COMPOSE_PROFILES=admin` |
 
 Use direct DNS records for the Matrix endpoints. LiveKit media ports do not pass through an HTTP CDN proxy.
 
@@ -26,3 +26,5 @@ dig +short rtc.example.com
 ```
 
 All required names should return the VM static address.
+
+With the default `.env.example`, the `admin` profile is enabled. Set `COMPOSE_PROFILES=` before deployment if Element Admin and the `panel` hostname are not required.
