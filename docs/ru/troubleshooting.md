@@ -2,37 +2,30 @@
 
 [English](../troubleshooting.md)
 
-## HAProxy 503
+## Статус
 
 ```bash
-docker compose --env-file .env ps
-docker compose --env-file .env logs --tail=200 haproxy
+docker compose --env-file .env ps -a
 ```
 
-## Synapse unhealthy
+## PostgreSQL
 
 ```bash
-docker compose --env-file .env logs --tail=200 synapse
-docker compose --env-file .env logs --tail=200 synapse-db
+docker compose --env-file .env logs --tail=200 postgres
+docker compose --env-file .env exec postgres psql -U postgres -d postgres -c '\l'
 ```
 
-## ACME/TLS
+После fresh initialization должны существовать отдельные databases `synapse` и `mas`.
+
+## Application logs
 
 ```bash
-docker compose --env-file .env logs --tail=200 acme
+docker compose --env-file .env logs --tail=200 synapse mas haproxy
 ```
 
-Проверьте Cloudflare token permissions и Zone ID.
-
-## Federation не работает
-
-Проверьте public DNS, GCP firewall TCP 443 и:
+## Пересборка локальных custom images
 
 ```bash
-curl -v https://matrix.example.com/.well-known/matrix/server
-curl -v https://matrix.example.com/_matrix/federation/v1/version
+docker compose --env-file .env build --no-cache config-init haproxy
+docker compose --env-file .env up -d
 ```
-
-## Звонок устанавливается, но нет media
-
-Проверьте `PUBLIC_IP`, GCP firewall TCP 7881 и UDP 50000-50050, затем LiveKit logs.

@@ -2,9 +2,9 @@
 
 Self-hosted public Matrix deployment for a Google Cloud Compute Engine VM.
 
-The stack provides Synapse, Matrix Authentication Service (MAS), Element Web, MatrixRTC/LiveKit, PostgreSQL, Redis, HAProxy and automatic TLS with Let's Encrypt through Cloudflare DNS-01.
+The stack provides Synapse, Matrix Authentication Service (MAS), Element Web, MatrixRTC/LiveKit, one PostgreSQL instance with separate Synapse and MAS databases, Redis, HAProxy and automatic TLS with Let's Encrypt through Cloudflare DNS-01.
 
-Federation is enabled by default. Other Matrix homeservers can reach this server over HTTPS on port 443.
+Federation is enabled by default. Other Matrix homeservers reach the server over HTTPS on port 443.
 
 [Русская версия](README.ru.md)
 
@@ -31,6 +31,10 @@ HAProxy :80/:443
    +-- rtc.example.com     -> LiveKit signalling
    +-- rtc-jwt.example.com -> MatrixRTC auth service
 
+Synapse ----> PostgreSQL <---- MAS
+              |- DB synapse / role synapse
+              `- DB mas     / role mas
+
 LiveKit media:
   TCP 7881
   UDP 50000-50050
@@ -44,65 +48,38 @@ LiveKit media:
 - Domain hosted in Cloudflare DNS.
 - Cloudflare API Token with `Zone / DNS / Edit` for the selected zone.
 - Docker Engine and Docker Compose plugin.
-- GitHub repository and GitHub Actions.
-- GHCR packages for the custom config and HAProxy images.
+- Git repository containing this project.
 
 See [docs/requirements.md](docs/requirements.md).
 
 ## 1. Create the GCP VM
 
-Recommended starting configuration:
+Practical starting configuration:
 
-- Ubuntu 24.04 LTS
-- 2 vCPU
-- 8 GB RAM
-- 50 GB balanced persistent disk
-- reserved static external IPv4
+- Ubuntu 24.04 LTS;
+- 2 vCPU;
+- 4 GB RAM minimum, 8 GB recommended for more active use;
+- 50 GB persistent disk;
+- reserved static external IPv4.
 
-Create firewall rules for:
-
-- TCP 80
-- TCP 443
-- TCP 7881
-- UDP 50000-50050
-- TCP 22 only from trusted administrator source addresses
+Create firewall rules for TCP 80/443/7881, UDP 50000-50050, and restrict TCP 22 to trusted administrator sources.
 
 Detailed instructions: [docs/gcp.md](docs/gcp.md).
 
-## 2. Create or fork the repository
+## 2. Clone the repository
 
-The repository publishes two custom images:
-
-```text
-ghcr.io/<owner>/matrix-federated-gcp-config:main
-ghcr.io/<owner>/matrix-federated-gcp-haproxy:main
-```
-
-After pushing the repository, wait for these GitHub Actions workflows to pass:
-
-```text
-Validate repository
-Publish config image
-Publish HAProxy image
-```
-
-See [docs/ghcr.md](docs/ghcr.md).
-
-## 3. Install Docker and clone the repository
+Install Git and Docker Engine, then clone the repository on the VM:
 
 ```bash
-sudo apt update
-sudo apt install -y ca-certificates curl git
+git clone <repository-url>
+cd matrix-federated-gcp
 ```
 
-Install Docker Engine using Docker's official Ubuntu instructions, then clone the repository:
+The project-owned `config-init` and HAProxy images are built locally from this checkout. No project-owned GHCR/Docker Hub packages are required. See [docs/local-builds.md](docs/local-builds.md).
 
-```bash
-git clone https://github.com/<owner>/<repository>.git
-cd <repository>
-```
+GitHub Actions are used only for validation/CI and do not publish deployment images.
 
-## 4. Generate `.env`
+## 3. Generate `.env`
 
 English wizard:
 
@@ -116,17 +93,7 @@ Russian wizard:
 python3 scripts/setup-env.py --lang ru
 ```
 
-The wizard asks for:
-
-- public domain;
-- GitHub/GHCR owner;
-- GCP VM static public IP;
-- Cloudflare Zone ID;
-- Cloudflare API Token;
-- ACME email;
-- initial MAS administrator.
-
-It generates service credentials automatically.
+The wizard asks for the public domain, GCP VM static IP, Cloudflare Zone ID/API Token, ACME email and initial MAS administrator. It generates PostgreSQL, MAS, Redis and LiveKit credentials automatically.
 
 Validate the result:
 
@@ -136,9 +103,9 @@ python3 scripts/check-env.py .env
 
 See [docs/env.md](docs/env.md).
 
-## 5. Create DNS records
+## 4. Create DNS records
 
-For `example.com`, create DNS-only records pointing to the VM static IP:
+For `example.com`, create DNS-only A records pointing to the VM static IP:
 
 ```text
 matrix.example.com   A  <STATIC_IP>
@@ -148,43 +115,39 @@ rtc.example.com      A  <STATIC_IP>
 rtc-jwt.example.com  A  <STATIC_IP>
 ```
 
-`panel.example.com` is optional and should only be created if Element Admin is enabled.
+`panel.example.com` is optional and is only needed when Element Admin is enabled.
 
 See [docs/dns.md](docs/dns.md).
 
-## 6. Deploy
-
-### Docker Compose
+## 5. Deploy
 
 ```bash
 docker compose --env-file .env pull
+docker compose --env-file .env build --pull config-init haproxy
 docker compose --env-file .env up -d
+docker compose --env-file .env ps
 ```
 
-### Portainer
+On the first PostgreSQL initialization, `postgres/init-databases.sh` creates two isolated databases and roles: `synapse` and `mas`.
 
-Portainer can deploy the repository directly and load `.env` into Stack environment variables. See [docs/portainer.md](docs/portainer.md).
-
-## 7. Validate the deployment
+## 6. Validate
 
 ```bash
 python3 scripts/smoke-test.sh .env
 ```
 
-Check federation endpoints:
+Federation endpoints:
 
 ```bash
 curl -fsS https://matrix.example.com/.well-known/matrix/server
 curl -fsS https://matrix.example.com/_matrix/federation/v1/version
 ```
 
-Expected server delegation uses HTTPS port 443. Details: [docs/federation.md](docs/federation.md).
-
 ## Documentation
 
 - [Requirements](docs/requirements.md)
 - [GCP deployment](docs/gcp.md)
-- [GHCR](docs/ghcr.md)
+- [Local image builds](docs/local-builds.md)
 - [Environment configuration](docs/env.md)
 - [DNS](docs/dns.md)
 - [Federation](docs/federation.md)

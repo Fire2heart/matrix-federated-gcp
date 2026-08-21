@@ -22,7 +22,6 @@ def main() -> int:
         description="Generate a matrix-federated-gcp .env safely. For interactive setup use scripts/setup-env.py."
     )
     parser.add_argument("--domain", required=True)
-    parser.add_argument("--ghcr-owner", required=True, help="GitHub/GHCR repository owner")
     parser.add_argument(
         "--public-ip",
         dest="public_ip",
@@ -90,7 +89,6 @@ def main() -> int:
 
     content = render_env(
         domain=args.domain,
-        ghcr_owner=args.ghcr_owner,
         public_ip=args.public_ip,
         cloudflare_zone_id=cloudflare_zone_id,
         cloudflare_api_token=args.cloudflare_api_token,

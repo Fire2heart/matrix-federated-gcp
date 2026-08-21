@@ -2,4 +2,6 @@
 
 ## 1.0.0
 
-Первая публичная GCP-версия с Matrix federation, HAProxy, MAS, Element Web, MatrixRTC/LiveKit, TLS через Cloudflare DNS-01 и custom images в GHCR.
+- Публичный federated Matrix deployment для GCP.
+- Локальная сборка собственных config-init и HAProxy images.
+- Один PostgreSQL instance с отдельными databases/roles для Synapse и MAS.

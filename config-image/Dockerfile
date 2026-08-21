@@ -7,9 +7,9 @@ FROM ${SYNAPSE_IMAGE}
 USER root
 COPY --from=mas /usr/local/bin/mas-cli /usr/local/bin/mas-cli
 COPY --from=mas /usr/local/share/mas-cli/ /usr/local/share/mas-cli/
-COPY render.py /opt/my_matrix/render.py
-RUN chmod 0755 /opt/my_matrix/render.py
+COPY render.py /opt/matrix-federated/render.py
+RUN chmod 0755 /opt/matrix-federated/render.py
 
-LABEL org.opencontainers.image.description="Configuration initializer for the my_matrix Docker Compose stack"
+LABEL org.opencontainers.image.description="Local configuration initializer for matrix-federated-gcp"
 
-ENTRYPOINT ["python3", "/opt/my_matrix/render.py"]
+ENTRYPOINT ["python3", "/opt/matrix-federated/render.py"]

@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE_PATH = ROOT / ".env.example"
 
 RANDOM_SECRET_KEYS = {
+    "POSTGRES_ADMIN_PASSWORD",
     "SYNAPSE_DB_PASSWORD",
     "MAS_DB_PASSWORD",
     "MAS_SHARED_SECRET",
@@ -98,7 +99,6 @@ def derived_values(domain: str) -> dict[str, str]:
 def render_env(
     *,
     domain: str,
-    ghcr_owner: str,
     public_ip: str,
     cloudflare_zone_id: str,
     cloudflare_api_token: str,
@@ -124,7 +124,6 @@ def render_env(
                 values[key] = value
 
     values.update(derived_values(domain))
-    values["GHCR_OWNER"] = ghcr_owner.strip().lower()
     values["PUBLIC_IP"] = public_ip
     values["CLOUDFLARE_ZONE_ID"] = cloudflare_zone_id
     values["ACME_EMAIL"] = acme_email
@@ -215,8 +214,6 @@ def validate_env(path: Path, *, allow_placeholders: set[str] | None = None) -> l
     if not values.get("ACME_IMAGE", "").startswith("neilpang/acme.sh:"):
         errors.append("ACME_IMAGE must reference neilpang/acme.sh with an explicit tag")
 
-    if not values.get("GHCR_OWNER", "").strip():
-        errors.append("GHCR_OWNER is empty")
 
     return errors
 

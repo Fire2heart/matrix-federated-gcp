@@ -2,6 +2,11 @@
 
 [Русская версия](ru/backup-restore.md)
 
-Back up the persistent Docker volumes and keep a protected copy of `.env`. For PostgreSQL, prefer database-aware backups (`pg_dump`) in addition to volume-level backups. Test restore procedures before relying on them for production.
+Keep a protected copy of `.env` and back up persistent Docker volumes. For PostgreSQL, use database-aware backups in addition to volume-level backups:
 
-Persistent state includes Synapse data/database, MAS configuration/database, Redis state and TLS/ACME state.
+```bash
+docker compose --env-file .env exec -T postgres pg_dump -U synapse synapse > synapse.sql
+docker compose --env-file .env exec -T postgres pg_dump -U mas mas > mas.sql
+```
+
+The single PostgreSQL volume contains both logical databases, but they remain separate and should be dumped/restored independently. Persistent state also includes Synapse media/config, MAS config, Redis and TLS/ACME state.

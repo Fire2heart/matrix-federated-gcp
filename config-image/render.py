@@ -167,7 +167,7 @@ def generate_synapse() -> None:
             "user": required("SYNAPSE_DB_USER"),
             "password": required("SYNAPSE_DB_PASSWORD"),
             "database": required("SYNAPSE_DB_NAME"),
-            "host": "synapse-db",
+            "host": "postgres",
             "port": 5432,
             "cp_min": 5,
             "cp_max": 10,
@@ -204,7 +204,7 @@ def generate_mas() -> None:
         + quote(db_user, safe="")
         + ":"
         + quote(db_password, safe="")
-        + "@mas-db:5432/"
+        + "@postgres:5432/"
         + quote(db_name, safe="")
         + "?sslmode=disable"
     )

@@ -31,7 +31,6 @@ MESSAGES = {
         "cancelled": "Cancelled. No changes were made.",
         "unknown": "Unknown selection. No changes were made.",
         "domain": "Public domain",
-        "owner": "GitHub/GHCR owner",
         "public_ip": "GCP VM static public IP (PUBLIC_IP)",
         "zone_id": "Cloudflare Zone ID",
         "email": "Email for Let's Encrypt/acme.sh",
@@ -47,7 +46,7 @@ MESSAGES = {
         "mode_fresh": "Mode: NEW INSTALLATION — new persistent-service credentials were generated.",
         "mode_safe": "Mode: SAFE UPDATE — existing persistent-service credentials were preserved.",
         "valid": "[OK] Environment validation passed.",
-        "next": "Next: load .env into the Portainer stack Environment variables.",
+        "next": "Next: run Docker Compose with local builds.",
         "git": "Do not commit .env to Git.",
     },
     "ru": {
@@ -66,7 +65,6 @@ MESSAGES = {
         "cancelled": "Отменено. Изменения не внесены.",
         "unknown": "Неизвестный вариант. Изменения не внесены.",
         "domain": "Публичный домен",
-        "owner": "GitHub/GHCR owner",
         "public_ip": "Статический публичный IP VM в GCP (PUBLIC_IP)",
         "zone_id": "Cloudflare Zone ID",
         "email": "Email для Let's Encrypt/acme.sh",
@@ -82,7 +80,7 @@ MESSAGES = {
         "mode_fresh": "Режим: НОВАЯ УСТАНОВКА — созданы новые credentials persistent-сервисов.",
         "mode_safe": "Режим: БЕЗОПАСНОЕ ОБНОВЛЕНИЕ — существующие credentials сохранены.",
         "valid": "[OK] Environment validation passed.",
-        "next": "Следующий шаг: загрузить .env в Environment variables стека Portainer.",
+        "next": "Следующий шаг: запустить Docker Compose с локальной сборкой.",
         "git": "Не коммитьте .env в Git.",
     },
 }
@@ -148,7 +146,6 @@ def main() -> int:
             fresh = False
 
     domain = ask(msg["domain"], msg, existing.get("PUBLIC_DOMAIN", ""))
-    ghcr_owner = ask(msg["owner"], msg, existing.get("GHCR_OWNER", ""))
     public_ip = ask_ip(msg["public_ip"], msg, existing.get("PUBLIC_IP", ""))
     zone_id = ask(msg["zone_id"], msg, existing.get("CLOUDFLARE_ZONE_ID", ""))
     acme_email = ask(msg["email"], msg, existing.get("ACME_EMAIL", ""), required=False)
@@ -173,7 +170,6 @@ def main() -> int:
 
     content = render_env(
         domain=domain,
-        ghcr_owner=ghcr_owner,
         public_ip=public_ip,
         cloudflare_zone_id=zone_id,
         cloudflare_api_token=token,

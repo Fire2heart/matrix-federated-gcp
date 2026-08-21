@@ -2,39 +2,30 @@
 
 [Русская версия](ru/troubleshooting.md)
 
-## 503 from HAProxy
-
-Check container state and HAProxy backend connectivity:
+## Status
 
 ```bash
-docker compose --env-file .env ps
-docker compose --env-file .env logs --tail=200 haproxy
+docker compose --env-file .env ps -a
 ```
 
-## Synapse unhealthy
+## PostgreSQL
 
 ```bash
-docker compose --env-file .env logs --tail=200 synapse
-docker compose --env-file .env logs --tail=200 synapse-db
+docker compose --env-file .env logs --tail=200 postgres
+docker compose --env-file .env exec postgres psql -U postgres -d postgres -c '\l'
 ```
 
-## ACME/TLS failure
+A fresh initialization should show separate `synapse` and `mas` databases.
+
+## Application logs
 
 ```bash
-docker compose --env-file .env logs --tail=200 acme
+docker compose --env-file .env logs --tail=200 synapse mas haproxy
 ```
 
-Check Cloudflare token permissions and Zone ID.
-
-## Federation unavailable
-
-Confirm public DNS, GCP TCP 443 firewall and:
+## Rebuild local custom images
 
 ```bash
-curl -v https://matrix.example.com/.well-known/matrix/server
-curl -v https://matrix.example.com/_matrix/federation/v1/version
+docker compose --env-file .env build --no-cache config-init haproxy
+docker compose --env-file .env up -d
 ```
-
-## Calls connect but media fails
-
-Check `PUBLIC_IP`, GCP TCP 7881 and UDP 50000-50050 firewall rules, and the LiveKit logs.

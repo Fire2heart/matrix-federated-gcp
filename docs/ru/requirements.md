@@ -4,28 +4,24 @@
 
 ## Google Cloud
 
-- Включён Compute Engine.
-- VM Ubuntu 24.04 LTS.
-- Рекомендуемый минимум: 2 vCPU, 8 GB RAM, 50 GB disk.
-- Зарезервированный статический внешний IPv4.
-- Firewall: TCP 80, 443, 7881; UDP 50000-50050.
-- SSH по возможности ограничен доверенными административными source IP.
+- Compute Engine VM с Ubuntu 24.04 LTS.
+- 2 vCPU.
+- Минимум 4 GB RAM; для более активной нагрузки желательно 8 GB.
+- Persistent disk с запасом под media и databases.
+- Зарезервированный static public IP.
+- Firewall: TCP 80/443/7881 и настроенный LiveKit UDP range.
 
-## DNS и TLS
+## DNS / TLS
 
-- Домен управляется через Cloudflare DNS.
-- API Token для выбранной зоны с `Zone / DNS / Edit`.
-- Zone ID.
+- Домен в Cloudflare.
+- DNS-only records для Matrix endpoints.
+- Cloudflare API Token с правом DNS edit для зоны.
 
-## Репозиторий
-
-- GitHub repository.
-- Включён GitHub Actions.
-- GHCR packages доступны VM.
-
-## ПО на VM
+## Host software
 
 - Git.
 - Docker Engine.
-- Docker Compose plugin.
-- Python 3 для setup/validation scripts.
+- Docker Compose plugin с поддержкой local build.
+- Исходящий Internet для официальных container registries, Let's Encrypt и Cloudflare API.
+
+Собственные GHCR или Docker Hub images проекту не нужны.

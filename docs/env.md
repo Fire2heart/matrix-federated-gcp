@@ -2,24 +2,20 @@
 
 [Русская версия](ru/env.md)
 
-Generate `.env` with `scripts/setup-env.py`. Do not commit `.env`.
+Generate `.env` with `python3 scripts/setup-env.py`. The file contains secrets and must not be committed.
 
-## Installation-specific values
+Important values include:
 
-- `GHCR_OWNER`: GitHub/GHCR owner.
-- `PUBLIC_DOMAIN`: base DNS domain.
-- `PUBLIC_IP`: GCP VM static public address; also advertised by LiveKit.
-- `CLOUDFLARE_ZONE_ID`: Cloudflare Zone ID.
-- `CLOUDFLARE_API_TOKEN`: DNS edit token.
-- `ACME_EMAIL`: Let's Encrypt account email.
+- `PUBLIC_DOMAIN`, `PUBLIC_IP`;
+- `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`;
+- `POSTGRES_ADMIN_PASSWORD` for the shared PostgreSQL instance;
+- `SYNAPSE_DB_USER/NAME/PASSWORD`;
+- `MAS_DB_USER/NAME/PASSWORD`;
+- MAS, Redis and LiveKit secrets.
 
-The wizard derives Matrix service hostnames from `PUBLIC_DOMAIN`.
+Synapse and MAS use separate database credentials even though both databases run inside one PostgreSQL container.
 
-## Persistent credentials
-
-Database, MAS, Redis and LiveKit credentials are generated automatically. Once persistent Docker volumes exist, keep these credentials unchanged. Use the wizard safe-update mode for an existing installation.
-
-## Validate
+Validate without printing secret values:
 
 ```bash
 python3 scripts/check-env.py .env

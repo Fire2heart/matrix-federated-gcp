@@ -14,7 +14,6 @@ ZONE = "0123456789abcdef0123456789abcdef"
 def write_fresh(path: Path) -> dict[str, str]:
     content = render_env(
         domain="example.com",
-        ghcr_owner="example",
         public_ip="34.120.10.20",
         cloudflare_zone_id=ZONE,
         cloudflare_api_token="test-token",
@@ -37,8 +36,7 @@ def main() -> None:
 
         updated_content = render_env(
             domain="example.com",
-            ghcr_owner="example",
-            public_ip="34.120.10.21",
+                public_ip="34.120.10.21",
             cloudflare_zone_id=before["CLOUDFLARE_ZONE_ID"],
             cloudflare_api_token="",
             acme_email=before["ACME_EMAIL"],

@@ -1,12 +1,10 @@
-# Проверка
+# Validation
 
 [English](../validation.md)
 
-## CI
+GitHub Actions `Validate repository` проверяет Python/shell syntax, генерацию `.env`, Compose rendering, PostgreSQL init script, сборку двух локальных custom images и HAProxy config. Deployment images в registry не публикуются.
 
-`Validate repository` проверяет структуру repository, генерацию `.env`, Compose, shell syntax, сборку двух custom Docker image и HAProxy config.
-
-## Runtime
+Runtime:
 
 ```bash
 docker compose --env-file .env ps

@@ -22,8 +22,7 @@ def main() -> None:
         fail("compose.yaml has no services map")
 
     required_services = {
-        "synapse-db",
-        "mas-db",
+        "postgres",
         "config-init",
         "synapse",
         "mas",
@@ -45,6 +44,10 @@ def main() -> None:
     haproxy_dockerfile = (ROOT / "haproxy" / "Dockerfile").read_text(encoding="utf-8")
     if "haproxy-main.cfg" not in haproxy_dockerfile or "entrypoint.sh" not in haproxy_dockerfile:
         fail("HAProxy image does not include its config/entrypoint")
+
+    postgres_init = (ROOT / "postgres" / "init-databases.sh").read_text(encoding="utf-8")
+    if "CREATE DATABASE" not in postgres_init or "synapse" not in postgres_init or "mas" not in postgres_init:
+        fail("PostgreSQL init script does not create both application databases")
 
     env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
     env_keys = {
@@ -69,6 +72,7 @@ def main() -> None:
     # EN: Basic guard against accidentally committed secrets in text files.
     # RU: Базовая защита от случайного коммита секретов в текстовых файлах.
     forbidden_prefixes = (
+        "POSTGRES_ADMIN_PASSWORD=",
         "SYNAPSE_DB_PASSWORD=",
         "MAS_DB_PASSWORD=",
         "MAS_SHARED_SECRET=",
@@ -92,13 +96,10 @@ def main() -> None:
                 if line.startswith(prefix) and "${" not in line and "CHANGE_ME" not in line:
                     fail(f"Possible committed secret in {path}: {prefix}")
 
-    # EN: Portability guard: custom GHCR images must follow repository_owner.
-    # RU: Проверка переносимости: custom GHCR images должны использовать repository_owner.
-    publish_cfg = (ROOT / ".github" / "workflows" / "publish-config-image.yml").read_text(encoding="utf-8")
-    publish_haproxy = (ROOT / ".github" / "workflows" / "publish-haproxy-image.yml").read_text(encoding="utf-8")
-    for path_name, text in (("publish-config-image.yml", publish_cfg), ("publish-haproxy-image.yml", publish_haproxy)):
-        if "github.repository_owner" not in text:
-            fail(f"{path_name} must derive the GHCR owner from github.repository_owner")
+    # EN: Deployment custom images are built locally; no project-owned registry is required.
+    # RU: Собственные deployment images собираются локально; registry проекта не требуется.
+    if "ghcr.io/${GHCR_OWNER}/matrix-federated-gcp-" in compose_text:
+        fail("compose.yaml still depends on project-owned GHCR images")
 
 
     # EN: Ensure the generated Element JSON shape remains serialisable.

@@ -2,18 +2,16 @@
 
 [Русская версия](ru/validation.md)
 
-## CI
+GitHub Actions `Validate repository` checks Python/shell syntax, `.env` generation, Compose rendering, the PostgreSQL init script, both local custom image builds and HAProxy configuration. It does not publish deployment images.
 
-`Validate repository` verifies repository structure, `.env` generation, Compose parsing, shell syntax, both custom Docker builds and HAProxy configuration.
-
-## Runtime
+Runtime:
 
 ```bash
 docker compose --env-file .env ps
 python3 scripts/smoke-test.sh .env
 ```
 
-Verify federation:
+Federation:
 
 ```bash
 curl -fsS https://matrix.example.com/.well-known/matrix/server

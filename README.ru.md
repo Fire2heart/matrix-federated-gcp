@@ -1,14 +1,14 @@
 # Matrix Federated GCP
 
-Публичный self-hosted Matrix для Google Cloud Compute Engine.
+Публичный self-hosted Matrix deployment для виртуальной машины Google Cloud Compute Engine.
 
-Стек включает Synapse, Matrix Authentication Service (MAS), Element Web, MatrixRTC/LiveKit, PostgreSQL, Redis, HAProxy и автоматический TLS через Let's Encrypt + Cloudflare DNS-01.
+Стек включает Synapse, Matrix Authentication Service (MAS), Element Web, MatrixRTC/LiveKit, один PostgreSQL с отдельными базами Synapse и MAS, Redis, HAProxy и автоматический TLS Let's Encrypt через Cloudflare DNS-01.
 
-Федерация включена по умолчанию. Другие Matrix homeserver могут обращаться к серверу по HTTPS на порту 443.
+Federation включена по умолчанию. Другие Matrix homeserver подключаются к серверу по HTTPS на порту 443.
 
 [English version](README.md)
 
-## Схема
+## Схема deployment
 
 ```text
 Internet
@@ -17,7 +17,7 @@ Internet
 Cloudflare DNS
    |
    v
-Статический публичный IP GCP
+GCP static public IP
    |
    v
 GCP firewall
@@ -30,6 +30,10 @@ HAProxy :80/:443
    +-- element.example.com -> Element Web
    +-- rtc.example.com     -> LiveKit signalling
    +-- rtc-jwt.example.com -> MatrixRTC auth service
+
+Synapse ----> PostgreSQL <---- MAS
+              |- DB synapse / role synapse
+              `- DB mas     / role mas
 
 LiveKit media:
   TCP 7881
@@ -44,89 +48,44 @@ LiveKit media:
 - Домен в Cloudflare DNS.
 - Cloudflare API Token с `Zone / DNS / Edit` для нужной зоны.
 - Docker Engine и Docker Compose plugin.
-- GitHub repository и GitHub Actions.
-- GHCR packages для custom config и HAProxy images.
+- Git repository с проектом.
 
 Подробнее: [docs/ru/requirements.md](docs/ru/requirements.md).
 
-## 1. Создать VM в GCP
+## 1. Создать GCP VM
 
-Рекомендуемый стартовый размер:
+Практическая стартовая конфигурация:
 
-- Ubuntu 24.04 LTS
-- 2 vCPU
-- 8 GB RAM
-- 50 GB balanced persistent disk
-- статический внешний IPv4
+- Ubuntu 24.04 LTS;
+- 2 vCPU;
+- минимум 4 GB RAM, 8 GB рекомендуется при более активном использовании;
+- 50 GB persistent disk;
+- зарезервированный static external IPv4.
 
-Firewall:
+Откройте TCP 80/443/7881 и UDP 50000-50050. TCP 22 ограничьте доверенными источниками администратора.
 
-- TCP 80
-- TCP 443
-- TCP 7881
-- UDP 50000-50050
-- TCP 22 только с доверенных административных адресов
+Подробнее: [docs/ru/gcp.md](docs/ru/gcp.md).
 
-Подробно: [docs/ru/gcp.md](docs/ru/gcp.md).
+## 2. Клонировать repository
 
-## 2. Создать или форкнуть репозиторий
-
-Репозиторий публикует два custom image:
-
-```text
-ghcr.io/<owner>/matrix-federated-gcp-config:main
-ghcr.io/<owner>/matrix-federated-gcp-haproxy:main
-```
-
-После push должны успешно завершиться:
-
-```text
-Validate repository
-Publish config image
-Publish HAProxy image
-```
-
-Подробнее: [docs/ru/ghcr.md](docs/ru/ghcr.md).
-
-## 3. Установить Docker и клонировать репозиторий
+После установки Git и Docker Engine:
 
 ```bash
-sudo apt update
-sudo apt install -y ca-certificates curl git
+git clone <repository-url>
+cd matrix-federated-gcp
 ```
 
-После установки Docker Engine:
+Собственные images `config-init` и HAProxy собираются локально из checkout репозитория. Собственные GHCR/Docker Hub packages не нужны. Подробнее: [docs/ru/local-builds.md](docs/ru/local-builds.md).
 
-```bash
-git clone https://github.com/<owner>/<repository>.git
-cd <repository>
-```
+GitHub Actions используются только для validation/CI и не публикуют deployment images.
 
-## 4. Создать `.env`
-
-Русский мастер:
+## 3. Создать `.env`
 
 ```bash
 python3 scripts/setup-env.py --lang ru
 ```
 
-English:
-
-```bash
-python3 scripts/setup-env.py
-```
-
-Мастер запрашивает:
-
-- публичный домен;
-- GitHub/GHCR owner;
-- статический публичный IP VM;
-- Cloudflare Zone ID;
-- Cloudflare API Token;
-- email для ACME;
-- первоначального MAS-администратора.
-
-Сервисные пароли генерируются автоматически.
+Мастер запрашивает публичный домен, статический IP VM, Cloudflare Zone ID/API Token, ACME email и первоначального MAS-администратора. Пароли PostgreSQL, MAS, Redis и LiveKit генерируются автоматически.
 
 Проверка:
 
@@ -134,11 +93,9 @@ python3 scripts/setup-env.py
 python3 scripts/check-env.py .env
 ```
 
-Подробнее: [docs/ru/env.md](docs/ru/env.md).
+## 4. Создать DNS
 
-## 5. Создать DNS
-
-Для `example.com`:
+Для `example.com` создайте DNS-only A records на static IP VM:
 
 ```text
 matrix.example.com   A  <STATIC_IP>
@@ -148,47 +105,43 @@ rtc.example.com      A  <STATIC_IP>
 rtc-jwt.example.com  A  <STATIC_IP>
 ```
 
-Все записи — DNS only. `panel.example.com` создаётся только при необходимости Element Admin.
+`panel.example.com` нужен только при включённом Element Admin.
 
-Подробнее: [docs/ru/dns.md](docs/ru/dns.md).
-
-## 6. Deploy
-
-Через Docker Compose:
+## 5. Deploy
 
 ```bash
 docker compose --env-file .env pull
+docker compose --env-file .env build --pull config-init haproxy
 docker compose --env-file .env up -d
+docker compose --env-file .env ps
 ```
 
-Через Portainer: [docs/ru/portainer.md](docs/ru/portainer.md).
+При первой инициализации PostgreSQL `postgres/init-databases.sh` создаёт две изолированные базы и роли: `synapse` и `mas`.
 
-## 7. Проверить
+## 6. Проверка
 
 ```bash
 python3 scripts/smoke-test.sh .env
 ```
 
-Федерация:
+Federation:
 
 ```bash
 curl -fsS https://matrix.example.com/.well-known/matrix/server
 curl -fsS https://matrix.example.com/_matrix/federation/v1/version
 ```
 
-Подробнее: [docs/ru/federation.md](docs/ru/federation.md).
-
 ## Документация
 
 - [Требования](docs/ru/requirements.md)
 - [GCP](docs/ru/gcp.md)
-- [GHCR](docs/ru/ghcr.md)
+- [Локальная сборка images](docs/ru/local-builds.md)
 - [Environment](docs/ru/env.md)
 - [DNS](docs/ru/dns.md)
-- [Федерация](docs/ru/federation.md)
+- [Federation](docs/ru/federation.md)
 - [Архитектура](docs/ru/architecture.md)
 - [Portainer](docs/ru/portainer.md)
-- [Проверка](docs/ru/validation.md)
-- [Эксплуатация](docs/ru/operations.md)
+- [Validation](docs/ru/validation.md)
+- [Operations](docs/ru/operations.md)
 - [Backup/restore](docs/ru/backup-restore.md)
 - [Troubleshooting](docs/ru/troubleshooting.md)

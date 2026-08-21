@@ -2,24 +2,20 @@
 
 [English](../env.md)
 
-Создавайте `.env` через `scripts/setup-env.py`. Файл `.env` не коммитится в Git.
+Создавайте `.env` через `python3 scripts/setup-env.py --lang ru`. Файл содержит секреты и не должен попадать в Git.
 
-## Параметры установки
+Основные значения:
 
-- `GHCR_OWNER`: владелец GitHub/GHCR.
-- `PUBLIC_DOMAIN`: базовый DNS domain.
-- `PUBLIC_IP`: статический публичный IP VM; этот адрес также сообщает LiveKit.
-- `CLOUDFLARE_ZONE_ID`: Cloudflare Zone ID.
-- `CLOUDFLARE_API_TOKEN`: token с DNS Edit.
-- `ACME_EMAIL`: email Let's Encrypt.
+- `PUBLIC_DOMAIN`, `PUBLIC_IP`;
+- `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`;
+- `POSTGRES_ADMIN_PASSWORD` для общего PostgreSQL instance;
+- `SYNAPSE_DB_USER/NAME/PASSWORD`;
+- `MAS_DB_USER/NAME/PASSWORD`;
+- секреты MAS, Redis и LiveKit.
 
-Hostnames сервисов вычисляются из `PUBLIC_DOMAIN`.
+Synapse и MAS используют разные credentials и разные databases, хотя работают через один PostgreSQL container.
 
-## Persistent credentials
-
-Пароли PostgreSQL, MAS, Redis и LiveKit генерируются автоматически. После создания persistent volumes эти credentials должны сохраняться. Для существующей установки используйте safe-update режим мастера.
-
-## Проверка
+Проверка без вывода секретов:
 
 ```bash
 python3 scripts/check-env.py .env

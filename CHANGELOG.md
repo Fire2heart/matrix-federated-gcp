@@ -2,4 +2,6 @@
 
 ## 1.0.0
 
-Initial public GCP deployment with Matrix federation, HAProxy ingress, MAS, Element Web, MatrixRTC/LiveKit, Cloudflare DNS-01 TLS and GHCR-based custom images.
+- Public federated Matrix deployment for GCP.
+- Local builds for project-owned config-init and HAProxy images.
+- Single PostgreSQL instance with isolated Synapse and MAS databases/roles.

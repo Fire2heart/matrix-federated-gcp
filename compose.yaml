@@ -7,40 +7,28 @@ x-logging: &default-logging
     max-file: "5"
 
 services:
-  # EN: Persistent databases. They live only on the private backend network.
-  # RU: Постоянные базы данных. Они доступны только во внутренней сети backend.
-  synapse-db:
+  # EN: One PostgreSQL instance with separate databases/roles for Synapse and MAS.
+  # RU: Один экземпляр PostgreSQL с отдельными базами/ролями для Synapse и MAS.
+  postgres:
     image: ${POSTGRES_IMAGE}
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${SYNAPSE_DB_USER}
-      POSTGRES_PASSWORD: ${SYNAPSE_DB_PASSWORD}
-      POSTGRES_DB: ${SYNAPSE_DB_NAME}
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD}
+      POSTGRES_DB: postgres
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+      SYNAPSE_DB_USER: ${SYNAPSE_DB_USER}
+      SYNAPSE_DB_PASSWORD: ${SYNAPSE_DB_PASSWORD}
+      SYNAPSE_DB_NAME: ${SYNAPSE_DB_NAME}
+      MAS_DB_USER: ${MAS_DB_USER}
+      MAS_DB_PASSWORD: ${MAS_DB_PASSWORD}
+      MAS_DB_NAME: ${MAS_DB_NAME}
       TZ: ${TZ}
     volumes:
-      - synapse_db_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init-databases.sh:/docker-entrypoint-initdb.d/10-matrix-databases.sh:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-    networks: [backend]
-    logging: *default-logging
-
-  mas-db:
-    image: ${POSTGRES_IMAGE}
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${MAS_DB_USER}
-      POSTGRES_PASSWORD: ${MAS_DB_PASSWORD}
-      POSTGRES_DB: ${MAS_DB_NAME}
-      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
-      TZ: ${TZ}
-    volumes:
-      - mas_db_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
       interval: 10s
       timeout: 5s
       retries: 30
@@ -50,8 +38,11 @@ services:
   # EN: One-shot renderer. It converts .env values into service configuration files.
   # RU: Одноразовый renderer. Он превращает значения .env в конфиги сервисов.
   config-init:
-    image: ghcr.io/${GHCR_OWNER}/matrix-federated-gcp-config:${CONFIG_IMAGE_TAG}
-    pull_policy: always
+    build:
+      context: ./config-image
+      args:
+        SYNAPSE_IMAGE: ${SYNAPSE_IMAGE}
+        MAS_IMAGE: ${MAS_IMAGE}
     restart: "no"
     environment:
       TZ: ${TZ}
@@ -97,7 +88,7 @@ services:
     image: ${SYNAPSE_IMAGE}
     restart: unless-stopped
     depends_on:
-      synapse-db:
+      postgres:
         condition: service_healthy
       config-init:
         condition: service_completed_successfully
@@ -130,7 +121,7 @@ services:
     image: ${MAS_IMAGE}
     restart: unless-stopped
     depends_on:
-      mas-db:
+      postgres:
         condition: service_healthy
       config-init:
         condition: service_completed_successfully
@@ -285,15 +276,6 @@ services:
     networks: [backend]
     logging: *default-logging
 
-  mas-cli:
-    image: ${MAS_DEBUG_IMAGE}
-    restart: "no"
-    profiles: [tools]
-    entrypoint: ["/usr/local/bin/mas-cli", "-c", "/config/mas.yaml"]
-    volumes:
-      - mas_config:/config:ro
-    networks: [backend]
-
   # EN: Automatic wildcard TLS through Cloudflare DNS-01.
   # RU: Автоматический wildcard TLS через Cloudflare DNS-01.
   acme:
@@ -358,8 +340,8 @@ services:
   # EN: Single HTTP/HTTPS ingress. Backends are reached over the Docker proxy network.
   # RU: Единственная HTTP/HTTPS точка входа. Backends доступны через Docker-сеть proxy.
   haproxy:
-    image: ghcr.io/${GHCR_OWNER}/matrix-federated-gcp-haproxy:${HAPROXY_IMAGE_TAG}
-    pull_policy: always
+    build:
+      context: ./haproxy
     restart: unless-stopped
     depends_on:
       acme:
@@ -400,9 +382,8 @@ networks:
 # RU: Постоянное состояние. Не удаляй эти volumes при обычном redeploy.
 volumes:
   synapse_data:
-  synapse_db_data:
+  postgres_data:
   mas_config:
-  mas_db_data:
   element_config:
   livekit_config:
   redis_data:
