@@ -11,15 +11,17 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v6
 
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
+          cache: pip
 
-      - name: Install validation dependency
-        run: pip install pyyaml
+      - name: Install validation dependencies
+        run: python -m pip install -r requirements-dev.txt
 
       - name: Validate repository structure
         run: python scripts/validate-repo.py
@@ -32,10 +34,11 @@ jobs:
           python scripts/generate-env.py \
             --public-ip 34.120.10.20 \
             --domain example.com \
-            --ghcr-owner example \
             --cloudflare-zone-id 0123456789abcdef0123456789abcdef \
             --cloudflare-api-token ci-token \
             --acme-email ci@example.com \
+            --admin-user admin \
+            --admin-display-name Administrator \
             --output .env.ci
 
       - name: Validate generated environment
@@ -47,30 +50,181 @@ jobs:
       - name: Check shell syntax
         run: |
           sh -n haproxy/entrypoint.sh
+          sh -n postgres/init-databases.sh
           sh -n scripts/smoke-test.sh
 
-      - name: Build config image
-        run: docker build -t matrix-federated-gcp-config:ci ./config-image
+      - name: Build local deployment images
+        run: |
+          docker compose --env-file .env.ci build \
+            --pull \
+            config-init \
+            haproxy
 
-      - name: Build HAProxy image
-        run: docker build -t matrix-federated-gcp-haproxy:ci ./haproxy
+      - name: Validate shared PostgreSQL initialization
+        run: |
+          docker compose --env-file .env.ci up -d postgres
+
+          postgres_id=$(docker compose --env-file .env.ci ps -q postgres)
+          test -n "$postgres_id"
+
+          for attempt in $(seq 1 60); do
+            status=$(docker inspect \
+              --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
+              "$postgres_id")
+
+            if [ "$status" = "healthy" ]; then
+              break
+            fi
+
+            if [ "$status" = "exited" ] || [ "$status" = "dead" ]; then
+              docker compose --env-file .env.ci logs postgres
+              exit 1
+            fi
+
+            sleep 2
+          done
+
+          test "$(docker inspect --format '{{.State.Health.Status}}' "$postgres_id")" = "healthy"
+
+          db_owners=$(
+            docker compose --env-file .env.ci exec -T postgres \
+              psql -U postgres -d postgres -Atc \
+              "SELECT d.datname || ':' || r.rolname
+               FROM pg_database d
+               JOIN pg_roles r ON r.oid = d.datdba
+               WHERE d.datname IN ('synapse', 'mas')
+               ORDER BY d.datname;"
+          )
+
+          printf '%s\n' "$db_owners"
+
+          printf '%s\n' "$db_owners" | grep -Fxq 'mas:mas'
+          printf '%s\n' "$db_owners" | grep -Fxq 'synapse:synapse'
+
+          test "$(printf '%s\n' "$db_owners" | wc -l)" -eq 2
+
+          login_roles=$(
+            docker compose --env-file .env.ci exec -T postgres \
+              psql -U postgres -d postgres -Atc \
+              "SELECT rolname
+               FROM pg_roles
+               WHERE rolcanlogin
+                 AND rolname IN ('synapse', 'mas')
+               ORDER BY rolname;"
+          )
+
+          printf '%s\n' "$login_roles" | grep -Fxq 'mas'
+          printf '%s\n' "$login_roles" | grep -Fxq 'synapse'
+
+      - name: Render and validate service configuration
+        run: |
+          docker compose --env-file .env.ci run \
+            --rm \
+            config-init
+
+      - name: Check generated configuration invariants
+        run: |
+          docker compose --env-file .env.ci run \
+            --rm \
+            -T \
+            --no-deps \
+            --entrypoint python3 \
+            config-init - <<'PY'
+          from pathlib import Path
+          import yaml
+
+          synapse = yaml.safe_load(
+              Path("/data/homeserver.yaml").read_text()
+          )
+
+          mas = yaml.safe_load(
+              Path("/generated/mas/mas.yaml").read_text()
+          )
+
+          auth = synapse["matrix_authentication_service"]
+
+          assert auth["enabled"] is True
+          assert auth["endpoint"] == "http://mas:8080/"
+          assert auth["force_http2"] is True
+
+          experimental = synapse["experimental_features"]
+
+          assert experimental["msc4143_enabled"] is True
+          assert experimental["msc4222_enabled"] is True
+
+          transports = synapse["matrix_rtc"]["transports"]
+
+          assert transports == [
+              {
+                  "type": "livekit",
+                  "livekit_service_url": "https://rtc-jwt.example.com",
+              }
+          ]
+
+          well_known = synapse["extra_well_known_client_content"]
+
+          assert "org.matrix.msc2965.authentication" not in well_known
+          assert "org.matrix.msc4143.rtc_foci" in well_known
+
+          listeners = {
+              listener["name"]: listener
+              for listener in mas["http"]["listeners"]
+          }
+
+          web_resources = {
+              resource["name"]
+              for resource in listeners["web"]["resources"]
+          }
+
+          internal_resources = {
+              resource["name"]
+              for resource in listeners["internal"]["resources"]
+          }
+
+          assert "health" not in web_resources
+          assert internal_resources == {"health"}
+
+          assert listeners["internal"]["binds"] == [
+              {
+                  "host": "0.0.0.0",
+                  "port": 8081,
+              }
+          ]
+          PY
 
       - name: Validate HAProxy runtime configuration
         run: |
           mkdir -p /tmp/haproxy-certs
-          openssl req -x509 -newkey rsa:2048 -nodes \
+
+          openssl req \
+            -x509 \
+            -newkey rsa:2048 \
+            -nodes \
             -keyout /tmp/haproxy-certs/key.pem \
             -out /tmp/haproxy-certs/cert.pem \
-            -days 1 -subj '/CN=example.com' >/dev/null 2>&1
-          cat /tmp/haproxy-certs/key.pem /tmp/haproxy-certs/cert.pem > /tmp/haproxy-certs/haproxy.pem
-          docker run --rm \
-            --entrypoint haproxy \
-            -e HAPROXY_MATRIX_HOST=matrix.example.com \
-            -e HAPROXY_MAS_HOST=mas.example.com \
-            -e HAPROXY_ELEMENT_HOST=element.example.com \
-            -e HAPROXY_PANEL_HOST=panel.example.com \
-            -e HAPROXY_RTC_JWT_HOST=rtc-jwt.example.com \
-            -e HAPROXY_RTC_HOST=rtc.example.com \
+            -days 1 \
+            -subj '/CN=example.com' \
+            >/dev/null 2>&1
+
+          cat \
+            /tmp/haproxy-certs/key.pem \
+            /tmp/haproxy-certs/cert.pem \
+            > /tmp/haproxy-certs/haproxy.pem
+
+          docker compose --env-file .env.ci run \
+            --rm \
+            -T \
+            --no-deps \
             -v /tmp/haproxy-certs:/etc/haproxy/certs:ro \
-            matrix-federated-gcp-haproxy:ci \
-            -c -f /usr/local/etc/haproxy/haproxy.cfg
+            --entrypoint haproxy \
+            haproxy \
+            -c \
+            -f /usr/local/etc/haproxy/haproxy.cfg
+
+      - name: Cleanup CI containers and volumes
+        if: always()
+        run: |
+          docker compose --env-file .env.ci down \
+            -v \
+            --remove-orphans \
+            || true
