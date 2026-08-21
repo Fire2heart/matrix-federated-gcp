@@ -290,14 +290,12 @@ services:
       AUTO_UPGRADE: "0"
       PUBLIC_DOMAIN: ${PUBLIC_DOMAIN}
       ACME_EMAIL: ${ACME_EMAIL:-}
-      CF_Token: ${CLOUDFLARE_API_TOKEN}
-      CF_Zone_ID: ${CLOUDFLARE_ZONE_ID}
+      DEDYN_TOKEN: ${CLOUDFLARE_API_TOKEN}
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
         test -n "$${PUBLIC_DOMAIN:-}" || { echo "PUBLIC_DOMAIN is required" >&2; exit 1; }
-        test -n "$${CF_Token:-}" || { echo "CLOUDFLARE_API_TOKEN is required" >&2; exit 1; }
-        test -n "$${CF_Zone_ID:-}" || { echo "CLOUDFLARE_ZONE_ID is required" >&2; exit 1; }
+        test -n "$${DEDYN_TOKEN:-}" || { echo "DEDYN_TOKEN is required" >&2; exit 1; }
 
         if [ -n "$${ACME_EMAIL:-}" ]; then
           acme.sh --register-account --server letsencrypt -m "$${ACME_EMAIL}" || true
@@ -308,7 +306,7 @@ services:
         if ! acme.sh --list | awk 'NR > 1 {print $$1}' | grep -Fxq "$${PUBLIC_DOMAIN}"; then
           acme.sh --issue \
             --server letsencrypt \
-            --dns dns_cf \
+            --dns dns_desec \
             --keylength ec-256 \
             -d "$${PUBLIC_DOMAIN}" \
             -d "*.$${PUBLIC_DOMAIN}"
