@@ -1,0 +1,76 @@
+name: Validate repository
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install validation dependency
+        run: pip install pyyaml
+
+      - name: Validate repository structure
+        run: python scripts/validate-repo.py
+
+      - name: Test environment safety logic
+        run: python scripts/test-env-tools.py
+
+      - name: Generate CI environment
+        run: |
+          python scripts/generate-env.py \
+            --public-ip 34.120.10.20 \
+            --domain example.com \
+            --ghcr-owner example \
+            --cloudflare-zone-id 0123456789abcdef0123456789abcdef \
+            --cloudflare-api-token ci-token \
+            --acme-email ci@example.com \
+            --output .env.ci
+
+      - name: Validate generated environment
+        run: python scripts/check-env.py .env.ci
+
+      - name: Validate Docker Compose
+        run: docker compose --env-file .env.ci config --quiet
+
+      - name: Check shell syntax
+        run: |
+          sh -n haproxy/entrypoint.sh
+          sh -n scripts/smoke-test.sh
+
+      - name: Build config image
+        run: docker build -t matrix-federated-gcp-config:ci ./config-image
+
+      - name: Build HAProxy image
+        run: docker build -t matrix-federated-gcp-haproxy:ci ./haproxy
+
+      - name: Validate HAProxy runtime configuration
+        run: |
+          mkdir -p /tmp/haproxy-certs
+          openssl req -x509 -newkey rsa:2048 -nodes \
+            -keyout /tmp/haproxy-certs/key.pem \
+            -out /tmp/haproxy-certs/cert.pem \
+            -days 1 -subj '/CN=example.com' >/dev/null 2>&1
+          cat /tmp/haproxy-certs/key.pem /tmp/haproxy-certs/cert.pem > /tmp/haproxy-certs/haproxy.pem
+          docker run --rm \
+            --entrypoint haproxy \
+            -e HAPROXY_MATRIX_HOST=matrix.example.com \
+            -e HAPROXY_MAS_HOST=mas.example.com \
+            -e HAPROXY_ELEMENT_HOST=element.example.com \
+            -e HAPROXY_PANEL_HOST=panel.example.com \
+            -e HAPROXY_RTC_JWT_HOST=rtc-jwt.example.com \
+            -e HAPROXY_RTC_HOST=rtc.example.com \
+            -v /tmp/haproxy-certs:/etc/haproxy/certs:ro \
+            matrix-federated-gcp-haproxy:ci \
+            -c -f /usr/local/etc/haproxy/haproxy.cfg

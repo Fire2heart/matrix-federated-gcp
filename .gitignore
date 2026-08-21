@@ -1,0 +1,31 @@
+# EN: Secrets / local deployment state
+# RU: Секреты / локальное состояние deployment
+.env
+.env.*
+!.env.example
+
+# EN: Python cache
+# RU: Кэш Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# EN: Virtual environments
+# RU: Виртуальные окружения
+.venv/
+venv/
+env/
+
+# EN: Test and tooling caches
+# RU: Кэши тестов и инструментов
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# EN: IDE / OS files
+# RU: Файлы IDE / ОС
+.DS_Store
+.idea/
+.vscode/

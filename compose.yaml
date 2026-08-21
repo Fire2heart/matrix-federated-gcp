@@ -1,0 +1,410 @@
+name: matrix_federated
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+services:
+  # EN: Persistent databases. They live only on the private backend network.
+  # RU: Постоянные базы данных. Они доступны только во внутренней сети backend.
+  synapse-db:
+    image: ${POSTGRES_IMAGE}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${SYNAPSE_DB_USER}
+      POSTGRES_PASSWORD: ${SYNAPSE_DB_PASSWORD}
+      POSTGRES_DB: ${SYNAPSE_DB_NAME}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+      TZ: ${TZ}
+    volumes:
+      - synapse_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks: [backend]
+    logging: *default-logging
+
+  mas-db:
+    image: ${POSTGRES_IMAGE}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${MAS_DB_USER}
+      POSTGRES_PASSWORD: ${MAS_DB_PASSWORD}
+      POSTGRES_DB: ${MAS_DB_NAME}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+      TZ: ${TZ}
+    volumes:
+      - mas_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks: [backend]
+    logging: *default-logging
+
+  # EN: One-shot renderer. It converts .env values into service configuration files.
+  # RU: Одноразовый renderer. Он превращает значения .env в конфиги сервисов.
+  config-init:
+    image: ghcr.io/${GHCR_OWNER}/matrix-federated-gcp-config:${CONFIG_IMAGE_TAG}
+    pull_policy: always
+    restart: "no"
+    environment:
+      TZ: ${TZ}
+      PUBLIC_IP: ${PUBLIC_IP}
+      SYNAPSE_SERVER_NAME: ${SYNAPSE_SERVER_NAME}
+      SYNAPSE_PUBLIC_BASEURL: ${SYNAPSE_PUBLIC_BASEURL}
+      SYNAPSE_REPORT_STATS: ${SYNAPSE_REPORT_STATS}
+      SYNAPSE_DB_USER: ${SYNAPSE_DB_USER}
+      SYNAPSE_DB_PASSWORD: ${SYNAPSE_DB_PASSWORD}
+      SYNAPSE_DB_NAME: ${SYNAPSE_DB_NAME}
+      ELEMENT_WEB_URL: ${ELEMENT_WEB_URL}
+      ELEMENT_DEFAULT_THEME: ${ELEMENT_DEFAULT_THEME}
+      ELEMENT_BRAND: ${ELEMENT_BRAND}
+      MAS_PUBLIC_BASEURL: ${MAS_PUBLIC_BASEURL}
+      MAS_DB_USER: ${MAS_DB_USER}
+      MAS_DB_PASSWORD: ${MAS_DB_PASSWORD}
+      MAS_DB_NAME: ${MAS_DB_NAME}
+      MAS_SHARED_SECRET: ${MAS_SHARED_SECRET}
+      MAS_BRAND_NAME: ${MAS_BRAND_NAME}
+      MAS_REGISTRATION_TOKEN_REQUIRED: ${MAS_REGISTRATION_TOKEN_REQUIRED}
+      MAS_EMAIL_REQUIRED: ${MAS_EMAIL_REQUIRED}
+      LIVEKIT_PUBLIC_URL: ${LIVEKIT_PUBLIC_URL}
+      LIVEKIT_JWT_SERVICE_URL: ${LIVEKIT_JWT_SERVICE_URL}
+      LIVEKIT_KEY: ${LIVEKIT_KEY}
+      LIVEKIT_SECRET: ${LIVEKIT_SECRET}
+      LIVEKIT_UDP_PORT_START: ${LIVEKIT_UDP_PORT_START}
+      LIVEKIT_UDP_PORT_END: ${LIVEKIT_UDP_PORT_END}
+      LIVEKIT_LOG_LEVEL: ${LIVEKIT_LOG_LEVEL}
+      USER_DIRECTORY_SEARCH_ALL: ${USER_DIRECTORY_SEARCH_ALL}
+      USER_DIRECTORY_EXCLUDE_REMOTE: ${USER_DIRECTORY_EXCLUDE_REMOTE}
+      MAS_TRUSTED_PROXIES: ${MAS_TRUSTED_PROXIES}
+    volumes:
+      - synapse_data:/data
+      - mas_config:/generated/mas
+      - element_config:/generated/element
+      - livekit_config:/generated/livekit
+    networks: [backend]
+    logging: *default-logging
+
+  # EN: Matrix homeserver. Public HTTP traffic reaches it only through HAProxy.
+  # RU: Matrix homeserver. Публичный HTTP-трафик приходит к нему только через HAProxy.
+  synapse:
+    image: ${SYNAPSE_IMAGE}
+    restart: unless-stopped
+    depends_on:
+      synapse-db:
+        condition: service_healthy
+      config-init:
+        condition: service_completed_successfully
+    environment:
+      SYNAPSE_CONFIG_PATH: /data/homeserver.yaml
+      TZ: ${TZ}
+    command: ["run"]
+    volumes:
+      - synapse_data:/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          python3 -c "import urllib.request;
+          urllib.request.urlopen(
+            'http://127.0.0.1:8008/_matrix/client/versions', timeout=3
+          )"
+      interval: 20s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    networks:
+      - backend
+      - proxy
+    logging: *default-logging
+
+  # EN: Matrix Authentication Service; keeps authentication logic separate from Synapse.
+  # RU: Matrix Authentication Service; отделяет аутентификацию от Synapse.
+  mas:
+    image: ${MAS_IMAGE}
+    restart: unless-stopped
+    depends_on:
+      mas-db:
+        condition: service_healthy
+      config-init:
+        condition: service_completed_successfully
+      synapse:
+        condition: service_healthy
+    command: ["-c", "/config/mas.yaml", "server"]
+    volumes:
+      - mas_config:/config:ro
+    networks:
+      - backend
+      - proxy
+    logging: *default-logging
+
+  # EN: End-user web client. Generated config is copied into the image at startup.
+  # RU: Пользовательский web-клиент. Сгенерированный config копируется при старте.
+  element:
+    image: ${ELEMENT_WEB_IMAGE}
+    restart: unless-stopped
+    user: "0:0"
+    depends_on:
+      config-init:
+        condition: service_completed_successfully
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        cp /generated/config.json /app/config.json
+        exec /docker-entrypoint.sh nginx -g 'daemon off;'
+    volumes:
+      - element_config:/generated:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:80/config.json"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - backend
+      - proxy
+    logging: *default-logging
+
+  element-admin:
+    image: ${ELEMENT_ADMIN_IMAGE}
+    restart: unless-stopped
+    profiles: [admin]
+    environment:
+      SERVER_NAME: ${SYNAPSE_SERVER_NAME}
+      TZ: ${TZ}
+    networks:
+      - backend
+      - proxy
+    logging: *default-logging
+
+  # EN: MatrixRTC media server. Only media ports are published directly on the host.
+  # RU: Media-сервер MatrixRTC. Напрямую на host публикуются только media-порты.
+  livekit:
+    image: ${LIVEKIT_IMAGE}
+    restart: unless-stopped
+    depends_on:
+      config-init:
+        condition: service_completed_successfully
+    command: ["--config", "/config/livekit.yaml"]
+    volumes:
+      - livekit_config:/config:ro
+    ports:
+      - "7881:7881/tcp"
+      - "${LIVEKIT_UDP_PORT_START}-${LIVEKIT_UDP_PORT_END}:${LIVEKIT_UDP_PORT_START}-${LIVEKIT_UDP_PORT_END}/udp"
+    networks:
+      - backend
+      - proxy
+    logging: *default-logging
+
+  # EN: Private state store for lk-jwt-service. It is not exposed on the host.
+  # RU: Внутреннее хранилище state для lk-jwt-service. На host не публикуется.
+  redis:
+    image: ${REDIS_IMAGE}
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      TZ: ${TZ}
+    command:
+      - /bin/sh
+      - -ec
+      - exec redis-server --appendonly yes --requirepass "$${REDIS_PASSWORD}"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 30
+    networks: [backend]
+    logging: *default-logging
+
+  lk-jwt-service:
+    image: ${LK_JWT_IMAGE}
+    restart: unless-stopped
+    depends_on:
+      synapse:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      livekit:
+        condition: service_started
+    environment:
+      LIVEKIT_URL: ${LIVEKIT_PUBLIC_URL}
+      LIVEKIT_KEY: ${LIVEKIT_KEY}
+      LIVEKIT_SECRET: ${LIVEKIT_SECRET}
+      LIVEKIT_JWT_BIND: :8080
+      LIVEKIT_FULL_ACCESS_HOMESERVERS: ${SYNAPSE_SERVER_NAME}
+      LIVEKIT_CS_API_URL_OVERRIDES: ${SYNAPSE_SERVER_NAME}=${SYNAPSE_PUBLIC_BASEURL}
+      LIVEKIT_REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      LIVEKIT_SANITY_CHECK_INTERVAL_SECONDS: "30"
+      LIVEKIT_LOG_LEVEL: ${LIVEKIT_LOG_LEVEL}
+      TZ: ${TZ}
+    networks:
+      - backend
+      - proxy
+    logging: *default-logging
+
+  # EN: One-shot initial MAS administrator bootstrap; guarded by a marker in mas_config.
+  # RU: Одноразовое создание первого MAS-admin; marker хранится в mas_config.
+  bootstrap-admin:
+    image: ${MAS_DEBUG_IMAGE}
+    restart: "no"
+    depends_on:
+      mas:
+        condition: service_started
+    environment:
+      MAS_ADMIN_USER: ${MAS_ADMIN_USER}
+      MAS_ADMIN_PASSWORD: ${MAS_ADMIN_PASSWORD}
+      MAS_ADMIN_DISPLAY_NAME: ${MAS_ADMIN_DISPLAY_NAME}
+    entrypoint: ["/busybox/sh", "-ec"]
+    command:
+      - |
+        if [ -f /config/.admin-bootstrapped ]; then
+          echo "Initial administrator was already bootstrapped; skipping."
+          exit 0
+        fi
+        echo "Waiting for MAS..."
+        until /busybox/wget -q -O /dev/null http://mas:8080/health; do
+          /busybox/sleep 2
+        done
+        /usr/local/bin/mas-cli -c /config/mas.yaml manage register-user "$${MAS_ADMIN_USER}" \
+          --password "$${MAS_ADMIN_PASSWORD}" \
+          --display-name "$${MAS_ADMIN_DISPLAY_NAME}" \
+          --admin --yes --ignore-password-complexity
+        touch /config/.admin-bootstrapped
+        echo "Initial administrator created."
+    volumes:
+      - mas_config:/config
+    networks: [backend]
+    logging: *default-logging
+
+  mas-cli:
+    image: ${MAS_DEBUG_IMAGE}
+    restart: "no"
+    profiles: [tools]
+    entrypoint: ["/usr/local/bin/mas-cli", "-c", "/config/mas.yaml"]
+    volumes:
+      - mas_config:/config:ro
+    networks: [backend]
+
+  # EN: Automatic wildcard TLS through Cloudflare DNS-01.
+  # RU: Автоматический wildcard TLS через Cloudflare DNS-01.
+  acme:
+    image: ${ACME_IMAGE}
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ}
+      AUTO_UPGRADE: "0"
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+      CF_Token: ${CLOUDFLARE_API_TOKEN}
+      CF_Zone_ID: ${CLOUDFLARE_ZONE_ID}
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        test -n "$${PUBLIC_DOMAIN:-}" || { echo "PUBLIC_DOMAIN is required" >&2; exit 1; }
+        test -n "$${CF_Token:-}" || { echo "CLOUDFLARE_API_TOKEN is required" >&2; exit 1; }
+        test -n "$${CF_Zone_ID:-}" || { echo "CLOUDFLARE_ZONE_ID is required" >&2; exit 1; }
+
+        if [ -n "$${ACME_EMAIL:-}" ]; then
+          acme.sh --register-account --server letsencrypt -m "$${ACME_EMAIL}" || true
+        else
+          acme.sh --register-account --server letsencrypt || true
+        fi
+
+        if ! acme.sh --list | awk 'NR > 1 {print $$1}' | grep -Fxq "$${PUBLIC_DOMAIN}"; then
+          acme.sh --issue \
+            --server letsencrypt \
+            --dns dns_cf \
+            --keylength ec-256 \
+            -d "$${PUBLIC_DOMAIN}" \
+            -d "*.$${PUBLIC_DOMAIN}"
+        fi
+
+        touch /certs/key.pem /certs/fullchain.pem
+        chmod 600 /certs/key.pem /certs/fullchain.pem
+
+        acme.sh --install-cert \
+          -d "$${PUBLIC_DOMAIN}" \
+          --ecc \
+          --key-file /certs/key.pem \
+          --fullchain-file /certs/fullchain.pem \
+          --reloadcmd 'cat /certs/key.pem /certs/fullchain.pem > /certs/haproxy.pem.tmp && chmod 600 /certs/haproxy.pem.tmp && mv /certs/haproxy.pem.tmp /certs/haproxy.pem'
+
+        cat /certs/key.pem /certs/fullchain.pem > /certs/haproxy.pem.tmp
+        chmod 600 /certs/haproxy.pem.tmp
+        mv /certs/haproxy.pem.tmp /certs/haproxy.pem
+
+        exec /entry.sh daemon
+    volumes:
+      - acme_data:/acme.sh
+      - haproxy_certs:/certs
+    healthcheck:
+      test: ["CMD-SHELL", "test -s /certs/haproxy.pem && openssl x509 -in /certs/haproxy.pem -noout -checkend 86400"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+    networks: [proxy]
+    logging: *default-logging
+
+  # EN: Single HTTP/HTTPS ingress. Backends are reached over the Docker proxy network.
+  # RU: Единственная HTTP/HTTPS точка входа. Backends доступны через Docker-сеть proxy.
+  haproxy:
+    image: ghcr.io/${GHCR_OWNER}/matrix-federated-gcp-haproxy:${HAPROXY_IMAGE_TAG}
+    pull_policy: always
+    restart: unless-stopped
+    depends_on:
+      acme:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ}
+      HAPROXY_MATRIX_HOST: ${HAPROXY_MATRIX_HOST}
+      HAPROXY_MAS_HOST: ${HAPROXY_MAS_HOST}
+      HAPROXY_ELEMENT_HOST: ${HAPROXY_ELEMENT_HOST}
+      HAPROXY_PANEL_HOST: ${HAPROXY_PANEL_HOST}
+      HAPROXY_RTC_JWT_HOST: ${HAPROXY_RTC_JWT_HOST}
+      HAPROXY_RTC_HOST: ${HAPROXY_RTC_HOST}
+    ports:
+      - "80:80/tcp"
+      - "443:443/tcp"
+    volumes:
+      - haproxy_certs:/etc/haproxy/certs:ro
+    healthcheck:
+      test: ["CMD", "haproxy", "-c", "-f", "/usr/local/etc/haproxy/haproxy.cfg"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    networks:
+      - proxy
+    logging: *default-logging
+
+# EN: backend is private service traffic; proxy is the HAProxy-facing application network.
+# RU: backend — внутренняя сеть сервисов; proxy — сеть приложений, доступных HAProxy.
+networks:
+  backend:
+    driver: bridge
+
+  proxy:
+    driver: bridge
+
+# EN: Persistent state. Do not remove these volumes during a normal redeploy.
+# RU: Постоянное состояние. Не удаляй эти volumes при обычном redeploy.
+volumes:
+  synapse_data:
+  synapse_db_data:
+  mas_config:
+  mas_db_data:
+  element_config:
+  livekit_config:
+  redis_data:
+  acme_data:
+  haproxy_certs:
