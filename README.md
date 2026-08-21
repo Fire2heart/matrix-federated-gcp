@@ -122,10 +122,7 @@ See [docs/dns.md](docs/dns.md).
 ## 5. Deploy
 
 ```bash
-docker compose --env-file .env pull --ignore-buildable
-docker compose --env-file .env build --pull config-init haproxy
-docker compose --env-file .env up -d
-docker compose --env-file .env ps
+docker compose --env-file .env up -d --build
 ```
 
 On the first PostgreSQL initialization, `postgres/init-databases.sh` creates two isolated databases and roles: `synapse` and `mas`.
