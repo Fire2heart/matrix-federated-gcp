@@ -163,11 +163,20 @@ def main() -> None:
     require_depends_on("mas", services["mas"], "postgres")
 
     bootstrap = services["bootstrap-admin"]
+
     if bootstrap.get("user") != "0:0":
         fail("bootstrap-admin must run as root so it can write its one-shot marker")
+
     bootstrap_command = "\n".join(bootstrap.get("command") or [])
-    if "--username" not in bootstrap_command or "http://mas:8081/health" not in bootstrap_command:
-        fail("bootstrap-admin must use current MAS register-user syntax and internal health listener")
+
+    if "http://mas:8081/health" not in bootstrap_command:
+        fail("bootstrap-admin must wait for the MAS internal health listener")
+
+    if "--username" in bootstrap_command:
+        fail("bootstrap-admin must use the positional username syntax required by MAS 1.21.0")
+
+    if '"$${MAS_ADMIN_USER}"' not in bootstrap_command:
+        fail("bootstrap-admin must pass MAS_ADMIN_USER as the positional register-user argument")
 
     volumes = compose.get("volumes") or {}
     if "postgres_data" not in volumes:
