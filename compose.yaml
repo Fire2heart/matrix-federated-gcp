@@ -267,10 +267,12 @@ services:
           /busybox/sleep 2
         done
         /usr/local/bin/mas-cli -c /config/mas.yaml manage register-user \
-          --username "$${MAS_ADMIN_USER}" \
+          "$${MAS_ADMIN_USER}" \
           --password "$${MAS_ADMIN_PASSWORD}" \
           --display-name "$${MAS_ADMIN_DISPLAY_NAME}" \
-          --admin --yes --ignore-password-complexity
+          --admin \
+          --yes \
+          --ignore-password-complexity
         touch /config/.admin-bootstrapped
         echo "Initial administrator created."
     volumes:
