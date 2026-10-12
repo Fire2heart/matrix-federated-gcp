@@ -344,6 +344,8 @@ services:
   # EN: Single HTTP/HTTPS ingress. Backends are reached over the Docker proxy network.
   # RU: Единственная HTTP/HTTPS точка входа. Backends доступны через Docker-сеть proxy.
   haproxy:
+    security_opt:
+      - no-new-privileges:true
     build:
       context: ./haproxy
       args:
